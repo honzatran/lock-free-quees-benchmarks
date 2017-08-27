@@ -17,6 +17,18 @@ std::unique_ptr<PcmContext> g_context;
 std::vector<std::unique_ptr<CounterHandleRecorder<CoreCountersHandle>>> g_coreHandles;
 std::vector<std::unique_ptr<CounterHandleRecorder<SystemCountersHandle>>> g_systemHandles;
 
+#if __cplusplus < 201402L
+
+template <typename T, typename... ARGS>
+std::unique_ptr<T> 
+make_unique(ARGS&&... args)
+{
+    return std::unique_ptr<T>(new T(std::forward<ARGS>(args)...));
+}
+
+
+#endif
+
 std::string toCppString(JNIEnv *env, jstring javaString) 
 {
     const char *charPtr = env->GetStringUTFChars(javaString, nullptr); 
@@ -50,7 +62,7 @@ Java_cz_uk_mff_peva_profilers_PmcHandle_initialize(JNIEnv *env, jobject object, 
 
     reader.loadFromDirectory(s);
 
-    g_context = std::make_unique<PcmContext>();
+    g_context = make_unique<PcmContext>();
     g_context->init(reader);
 
     return false;
@@ -134,7 +146,7 @@ Java_cz_uk_mff_peva_profilers_PmcHandle_getCoreProfiler(JNIEnv *env,
         operation, PcmWrapper::FOUR, std::move(handle));
 
     g_coreHandles.push_back(
-        std::make_unique<decltype(mixin)>(std::move(mixin)));
+        make_unique<decltype(mixin)>(std::move(mixin)));
 
     jclass cls = env->FindClass("cz/uk/mff/peva/profilers/PmcCoreCounterHandle");
 
