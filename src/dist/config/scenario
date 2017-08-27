@@ -1,0 +1,68 @@
+#batch size 1
+batchSize=1
+
+latency.burst_size=1
+benchmark.type=JCTools
+csv.output.dir=batch1/results-burst1-p1
+latency.producer_count=1,
+run benchmark
+benchmark.type=Disruptor
+run benchmark
+#change producer count and output directory
+csv.output.dir=batch1/results-burst1-p2,latency.producer_count=2,
+benchmark.type=JCTools
+run benchmark
+benchmark.type=Disruptor
+run benchmark
+#change producer count and output directory
+csv.output.dir=batch1/results-burst1-p4,latency.producer_count=4,
+benchmark.type=JCTools
+run benchmark
+benchmark.type=Disruptor
+run benchmark
+
+#burst 100
+latency.burst_size=100
+
+csv.output.dir=batch1/results-burst100-p1,latency.producer_count=1,
+benchmark.type=JCTools
+run benchmark
+benchmark.type=Disruptor
+run benchmark
+#change producer count and output directory
+csv.output.dir=batch1/results-burst100-p2,latency.producer_count=2,
+benchmark.type=JCTools
+run benchmark
+benchmark.type=Disruptor
+run benchmark
+#change producer count and output directory
+csv.output.dir=batch1/results-burst100-p4,latency.producer_count=4,
+benchmark.type=JCTools
+run benchmark
+benchmark.type=Disruptor
+run benchmark
+
+#batch size 10
+batchSize=100
+
+latency.burst_size=1
+
+csv.output.dir=batch100/results-burst1-p1,latency.producer_count=1,
+benchmark.type=JCTools
+run benchmark
+benchmark.type=Disruptor
+run benchmark
+#change producer count and output directory
+csv.output.dir=batch100/results-burst1-p2,latency.producer_count=2,
+benchmark.type=JCTools
+run benchmark
+benchmark.type=Disruptor
+run benchmark
+#change producer count and output directory
+csv.output.dir=batch100/results-burst1-p4,latency.producer_count=4,
+benchmark.type=JCTools
+run benchmark
+benchmark.type=Disruptor
+run benchmark
+
+
