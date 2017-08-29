@@ -674,8 +674,9 @@ public class JCToolsBenchmark implements ILatencyBenchmark {
             String name = String.format("JCTools_%dp1c_producer_%d", producerCount, i);
             producer.setPrefix(name);
 
-            control.initProfilers(producer);
+
             Thread producerThread = threadCreator.createProducer(producer);
+            control.initProfilers(producer);
 
             producerThread.start();
 
