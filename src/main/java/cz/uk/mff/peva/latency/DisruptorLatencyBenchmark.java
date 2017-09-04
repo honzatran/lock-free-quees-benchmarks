@@ -57,6 +57,7 @@ public class DisruptorLatencyBenchmark implements ILatencyBenchmark{
 
         private int burstIndex = 0;
         private int profiled = 0;
+        private int operationFinishedInvoked = 0;
         private final String prefix;
 
         private ProfiledConsumer(
@@ -105,9 +106,12 @@ public class DisruptorLatencyBenchmark implements ILatencyBenchmark{
         }
 
         private void finishOperation() {
+            final String prefix = this.prefix + "_" + operationFinishedInvoked;
             for (int i = 0; i < profilers.size(); i++) {
                 profilers.get(i).recordResult(prefix);
             }
+
+            operationFinishedInvoked++;
         }
 
         @Override
