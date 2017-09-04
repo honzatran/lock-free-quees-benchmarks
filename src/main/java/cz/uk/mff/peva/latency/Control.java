@@ -100,4 +100,15 @@ public class Control {
             runnable.addProfiler(pmcCoreProfiler);
         }
     }
+
+    public PmcCoreProfiler initProfiler(int cpuId) {
+        if (pmcProfiler != null && cpuId != ThreadPinnedRunnable.NO_CPU_SET) {
+
+            return coreProfilers.computeIfAbsent(
+                    cpuId,
+                    cpu -> pmcProfiler.getPmcCoreProfiler(cpu));
+        }
+
+        return null;
+    }
 }

@@ -64,10 +64,14 @@ public class PmcProfiler implements AutoCloseable {
         BenchmarkMode mode = BenchmarkMode.parse(
                 config.getString(QueueLatencyBenchmarkArgs.BENCHMARK_MODE));
 
-        if (mode == BenchmarkMode.Histogram) {
-            return config.getInt(QueueLatencyBenchmarkArgs.OPERATION_COUNT);
-        } else {
-            return config.getInt(QueueLatencyBenchmarkArgs.ITERATION);
+        switch (mode) {
+            case HwCounters:
+            case Histogram:
+                return config.getInt(QueueLatencyBenchmarkArgs.OPERATION_COUNT);
+            case AverageTime:
+                return config.getInt(QueueLatencyBenchmarkArgs.ITERATION);
+            default:
+                throw new IndexOutOfBoundsException();
         }
     }
 
@@ -76,7 +80,7 @@ public class PmcProfiler implements AutoCloseable {
     }
 
     public PmcCoreProfiler getPmcCoreProfiler(int cpu) {
-        PmcCoreCounterHandle coreHandle = handle.getCoreProfiler(cpu, operation);
+        final PmcCoreCounterHandle coreHandle = handle.getCoreProfiler(cpu, operation);
         return new PmcCoreProfiler(coreHandle, outputDir, cpu);
     }
 

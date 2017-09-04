@@ -5,7 +5,8 @@ package cz.uk.mff.peva.latency;
  */
 public enum BenchmarkMode {
     AverageTime("AverageTime"),
-    Histogram("Histogram");
+    Histogram("Histogram"),
+    HwCounters("HwCounters");
 
     String text;
 
@@ -19,6 +20,8 @@ public enum BenchmarkMode {
                 return AverageTime;
             case "Histogram":
                 return Histogram;
+            case "HwCounters":
+                return HwCounters;
             default:
                 throw new RuntimeException(text + "is not benchmark mode");
         }

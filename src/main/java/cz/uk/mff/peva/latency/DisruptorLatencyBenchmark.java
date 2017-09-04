@@ -3,11 +3,11 @@ package cz.uk.mff.peva.latency;
 import com.lmax.disruptor.*;
 import com.lmax.disruptor.dsl.Disruptor;
 import com.lmax.disruptor.dsl.ProducerType;
+import cz.uk.mff.peva.AffinityThreadCreator;
 import cz.uk.mff.peva.Benchmark;
-import cz.uk.mff.peva.CsvPrinter;
+import cz.uk.mff.peva.IIterationProfiler;
 import cz.uk.mff.peva.IThreadCreator;
-import cz.uk.mff.peva.ThreadLocalState;
-import org.HdrHistogram.Histogram;
+import cz.uk.mff.peva.profilers.PmcCoreProfiler;
 
 import java.io.FileNotFoundException;
 import java.io.IOException;
@@ -47,6 +47,79 @@ public class DisruptorLatencyBenchmark implements ILatencyBenchmark{
         }
     }
 
+    private static class ProfiledConsumer implements EventHandler<RunnableHolder>, LifecycleAware {
+        private final Control control;
+
+        private final int profiledOperation;
+        private final int operationCount;
+
+        private final List<IIterationProfiler> profilers = new ArrayList<>();
+
+        private int burstIndex = 0;
+        private int profiled = 0;
+        private final String prefix;
+
+        private ProfiledConsumer(
+                Control control,
+                int burstSize,
+                int producerCount,
+                int operationCount,
+                String prefix) {
+
+            this.control = control;
+            this.prefix = prefix;
+            this.profiledOperation = burstSize * producerCount;
+            this.operationCount = operationCount;
+        }
+
+        @Override
+        public void onEvent(RunnableHolder event, long sequence, boolean endOfBatch) throws Exception {
+            event.runnable.run();
+
+            burstIndex++;
+
+            if (burstIndex == profiledOperation) {
+                onOperationEnd();
+                profiled++;
+
+                if (profiled == operationCount) {
+                    finishOperation();
+                    profiled = 0;
+                }
+                burstIndex = 0;
+
+                onOperationStart();
+            }
+        }
+
+        private void onOperationStart() {
+            for (int i = 0; i < profilers.size(); i++) {
+                profilers.get(i).onIterationStart();
+            }
+        }
+
+        private void onOperationEnd() {
+            for (int i = 0; i < profilers.size(); i++) {
+                profilers.get(i).onIterationEnd();
+            }
+        }
+
+        private void finishOperation() {
+            for (int i = 0; i < profilers.size(); i++) {
+                profilers.get(i).recordResult(prefix);
+            }
+        }
+
+        @Override
+        public void onStart() {
+            control.waitForStart();
+            onOperationStart();
+        }
+
+        @Override
+        public void onShutdown() { }
+    }
+
     private final QueueLatencyBenchmarkArgs args;
     private final int producerCount;
     private final List<Thread> threads;
@@ -74,9 +147,27 @@ public class DisruptorLatencyBenchmark implements ILatencyBenchmark{
                 producerType,
                 new BusySpinWaitStrategy());
 
-        Consumer consumer = new Consumer(control);
+        if (args.getBenchmarkMode() != BenchmarkMode.HwCounters) {
+            Consumer consumer = new Consumer(control);
+            disruptor.handleEventsWith(consumer);
+        } else {
 
-        disruptor.handleEventsWith(consumer);
+            ProfiledConsumer consumer = new ProfiledConsumer(
+                    control,
+                    args.getBurstSize(),
+                    args.getProducerCount(),
+                    args.getOperationCount(),
+                    benchmarkName + "_consumer");
+
+            if (threadCreator instanceof AffinityThreadCreator) {
+                int consumerCpu = args.getConfig().getInt(AffinityThreadCreator.CONSUMER_CPUS);
+                PmcCoreProfiler coreProfiler = control.initProfiler(consumerCpu);
+
+                consumer.profilers.add(coreProfiler);
+            }
+
+            disruptor.handleEventsWith(consumer);
+        }
 
         List<DisruptorAverageTimeProducer> benchmarks = new ArrayList<>();
 

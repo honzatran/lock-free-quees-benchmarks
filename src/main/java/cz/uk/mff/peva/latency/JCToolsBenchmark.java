@@ -90,10 +90,10 @@ public class JCToolsBenchmark implements ILatencyBenchmark {
 
     private abstract class SingleProducerCommon extends ProducerCommon {
         private final SingleProducerOperation operation = new SingleProducerOperation();
-        private final SpscArrayQueue<Runnable> queue;
-        private final ThreadLocalState threadLocalState;
 
         protected final Control control;
+        protected final ThreadLocalState threadLocalState;
+        protected final SpscArrayQueue<Runnable> queue;
 
         SingleProducerCommon(
                 SpscArrayQueue<Runnable> queue,
@@ -118,10 +118,10 @@ public class JCToolsBenchmark implements ILatencyBenchmark {
 
     private abstract class MultiProducerCommon extends ProducerCommon {
         private final MultipleProducerOperation operation = new MultipleProducerOperation();
-        private final MpscArrayQueue<Runnable> queue;
-        private final ThreadLocalState threadLocalState;
 
+        protected final ThreadLocalState threadLocalState;
         protected final Control control;
+        protected final MpscArrayQueue<Runnable> queue;
 
         protected MultiProducerCommon(
                 MpscArrayQueue<Runnable> queue,
@@ -441,6 +441,102 @@ public class JCToolsBenchmark implements ILatencyBenchmark {
         }
     }
 
+    private final class SingleHwCounterProducer extends SingleProducerCommon implements Runnable {
+
+        SingleHwCounterProducer(
+                SpscArrayQueue<Runnable> queue,
+                int warmupIteration,
+                int iteration,
+                int batchSize,
+                Control control,
+                ProfiledConsumer<SpscArrayQueue<Runnable>> consumer) {
+            super(queue, warmupIteration, iteration, batchSize, control);
+        }
+
+        @Override
+        public void run() {
+            control.waitForStart();
+
+            for (int i = 0; i < warmupIteration; i++) {
+                System.gc();
+
+                System.out.println("WARMUP ITERATION " + i);
+                runSingleIteration();
+                control.waitForNextIteration();
+            }
+
+            for (int i = 0; i < iteration; i++) {
+                System.gc();
+
+                System.out.println("ITERATION " + i);
+                runSingleIteration();
+                control.waitForNextIteration();
+            }
+
+            control.stop();
+        }
+
+        private void runSingleIteration() {
+            for (int i = 0; i < operationCount; i++) {
+                onOperationStart();
+                sendBurstSize(queue, threadLocalState.getEmptyTask(), threadLocalState.getLastTask());
+                onOperationEnd();
+
+                threadLocalState.waitForLastTaskExecution();
+                threadLocalState.resetLastTask();
+            }
+
+            finishOperationsProfiling();
+        }
+    }
+
+    private final class MultiHwCounterProducer extends MultiProducerCommon implements Runnable {
+
+        protected MultiHwCounterProducer(
+                MpscArrayQueue<Runnable> queue,
+                int warmupIteration,
+                int iteration,
+                int batchSize,
+                Control control) {
+            super(queue, warmupIteration, iteration, batchSize, control);
+        }
+
+        @Override
+        public void run() {
+            control.waitForStart();
+
+            for (int i = 0; i < warmupIteration; i++) {
+                System.gc();
+
+                System.out.println("WARMUP ITERATION " + i);
+                runSingleIteration();
+                control.waitForNextIteration();
+            }
+
+            for (int i = 0; i < iteration; i++) {
+                System.gc();
+
+                System.out.println("ITERATION " + i);
+                runSingleIteration();
+                control.waitForNextIteration();
+            }
+
+            control.stop();
+        }
+
+        void runSingleIteration() {
+            for (int i = 0; i < operationCount; i++) {
+                onOperationStart();
+                sendBurstSize(queue, threadLocalState.getEmptyTask(), threadLocalState.getLastTask());
+                onOperationEnd();
+
+                threadLocalState.waitForLastTaskExecution();
+                threadLocalState.resetLastTask();
+            }
+
+            finishOperationsProfiling();
+        }
+    }
 
 
     private final static class Consumer<Q extends Queue<Runnable>> implements Runnable {
@@ -450,6 +546,38 @@ public class JCToolsBenchmark implements ILatencyBenchmark {
         private Consumer(Q queue, Control control, IdleStrategy idleStrategy) {
             this.control = control;
             this.queueConsumer = new QueueConsumer<>(queue, idleStrategy);
+        }
+
+        @Override
+        public void run() {
+            control.waitForStart();
+            queueConsumer.start();
+            queueConsumer.run();
+        }
+
+        public void stop() throws InterruptedException {
+            queueConsumer.stop();
+        }
+    }
+
+    private final static class ProfiledConsumer<Q extends Queue<Runnable>> extends ThreadPinnedRunnable implements Runnable {
+        private final Control control;
+        private final QueueProfilledConsumer<Runnable, Q> queueConsumer;
+
+        private ProfiledConsumer(
+                Q queue,
+                Control control,
+                IdleStrategy idleStrategy,
+                int profileCount,
+                int operationCount) {
+
+            this.control = control;
+            this.queueConsumer = new QueueProfilledConsumer<>(
+                    queue,
+                    idleStrategy,
+                    profileCount,
+                    operationCount,
+                    this);
         }
 
         @Override
@@ -496,10 +624,18 @@ public class JCToolsBenchmark implements ILatencyBenchmark {
     public void start(Control control) throws Exception {
         System.out.println("JC TOOLS");
 
-        if (benchmarkMode == BenchmarkMode.AverageTime) {
-            runAverageTimeBenchmarks(control);
-        } else {
-            runHistogramBenchmarks(control);
+        switch (benchmarkMode) {
+            case AverageTime:
+                runAverageTimeBenchmarks(control);
+                break;
+            case Histogram:
+                runHistogramBenchmarks(control);
+                break;
+            case HwCounters:
+                runHwCountersBenchmarks(control);
+                break;
+            default:
+                throw new IndexOutOfBoundsException();
         }
 
         // start producer threads
@@ -547,9 +683,7 @@ public class JCToolsBenchmark implements ILatencyBenchmark {
         control.waitForStart();
         control.waitForStop();
 
-        for (final Thread thread : threads) {
-            thread.join();
-        }
+        stopWorkerThreads();
 
         consumer.stop();
         consumerThread.join();
@@ -596,9 +730,7 @@ public class JCToolsBenchmark implements ILatencyBenchmark {
         control.waitForStart();
         control.waitForStop();
 
-        for (final Thread thread : threads) {
-            thread.join();
-        }
+        stopWorkerThreads();
 
         consumer.stop();
         consumerThread.join();
@@ -647,9 +779,7 @@ public class JCToolsBenchmark implements ILatencyBenchmark {
         control.waitForStart();
         control.waitForStop();
 
-        for (final Thread thread : threads) {
-            thread.join();
-        }
+        stopWorkerThreads();
 
         consumer.stop();
         consumerThread.join();
@@ -691,9 +821,7 @@ public class JCToolsBenchmark implements ILatencyBenchmark {
         control.waitForStart();
         control.waitForStop();
 
-        for (final Thread thread : threads) {
-            thread.join();
-        }
+        stopWorkerThreads();
 
         consumer.stop();
         consumerThread.join();
@@ -702,5 +830,116 @@ public class JCToolsBenchmark implements ILatencyBenchmark {
             String name = String.format("JCTools_%dp1c_producer_%d", producerCount, i);
             printer.print(name, producers.get(i).histograms);
         }
+    }
+
+    private void stopWorkerThreads() throws InterruptedException {
+        for (final Thread thread : threads) {
+            thread.join();
+        }
+    }
+
+    private void runHwCountersBenchmarks(final Control control) throws InterruptedException {
+        if (producerCount == 1) {
+            run1P1CHwCounters(control);
+        } else if (producerCount > 1) {
+            runMP1CHwCounters(control);
+        }
+    }
+
+    private void run1P1CHwCounters(final Control control) throws InterruptedException {
+        final SpscArrayQueue<Runnable> queue = new SpscArrayQueue<>(64 * 1024);
+
+        ProfiledConsumer<SpscArrayQueue<Runnable>> consumer = new ProfiledConsumer<>(
+                queue,
+                control,
+                new BusySpinIdleStrategy(),
+                burstSize,
+                operationCount);
+
+        consumer.setPrefix("JCTools_consumer");
+
+        SingleHwCounterProducer singleProducer = new SingleHwCounterProducer(
+                queue,
+                warmupIteration,
+                iteration,
+                batchSize,
+                control,
+                consumer);
+
+        singleProducer.setPrefix(JC_TOOLS_1P1C);
+
+        Thread producerThread = threadCreator.createProducer(singleProducer);
+        Thread consumerThread = threadCreator.createConsumer(consumer);
+
+        control.initProfilers(consumer);
+        control.initProfilers(singleProducer);
+        producerThread.start();
+
+        threads.add(producerThread);
+
+        consumerThread.start();
+
+
+
+
+        control.waitForStart();
+        control.waitForStop();
+
+        stopWorkerThreads();
+
+        consumer.stop();
+        consumerThread.join();
+    }
+
+    private void runMP1CHwCounters(final Control control) throws InterruptedException {
+        final MpscArrayQueue<Runnable> queue = new MpscArrayQueue<>(64 * 1024);
+
+        final List<MultiHwCounterProducer> producers = new ArrayList<>();
+
+        ProfiledConsumer<MpscArrayQueue<Runnable>> consumer = new ProfiledConsumer<>(
+                queue,
+                control,
+                new BusySpinIdleStrategy(),
+                burstSize * producerCount,
+                operationCount);
+
+        for (int i = 0; i < producerCount; i++) {
+            MultiHwCounterProducer producer = new MultiHwCounterProducer(
+                    queue,
+                    warmupIteration,
+                    iteration,
+                    batchSize,
+                    control);
+
+            producers.add(producer);
+            String name = String.format("JCTools_%dp1c_producer_%d", producerCount, i);
+            producer.setPrefix(name);
+
+
+            Thread producerThread = threadCreator.createProducer(producer);
+            control.initProfilers(producer);
+
+            producerThread.start();
+
+            threads.add(producerThread);
+        }
+
+
+        Thread consumerThread = threadCreator.createConsumer(consumer);
+        control.initProfilers(consumer);
+        consumer.setPrefix(String.format("JCTools_%dp1c_consumer", producerCount));
+
+
+        consumerThread.start();
+
+
+        control.waitForStart();
+        control.waitForStop();
+
+        stopWorkerThreads();
+
+        consumer.stop();
+
+        consumerThread.join();
     }
 }

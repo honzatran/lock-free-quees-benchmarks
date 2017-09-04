@@ -1,5 +1,4 @@
 package cz.uk.mff.peva.latency; import com.lmax.disruptor.RingBuffer;
-import cz.uk.mff.peva.IIterationProfiler;
 import cz.uk.mff.peva.ThreadLocalState;
 import cz.uk.mff.peva.ThreadPinnedRunnable;
 import org.HdrHistogram.Histogram;
@@ -66,14 +65,23 @@ class DisruptorAverageTimeProducerL0 extends ThreadPinnedRunnable implements IAv
     public void runBenchmark() {
         control.waitForStart();
 
-        if (benchmarkMode == BenchmarkMode.AverageTime) {
-            runAverageTimeMode();
-        } else {
-            runHistogramMode();
+        switch (benchmarkMode) {
+            case AverageTime:
+                runAverageTimeMode();
+                break;
+            case Histogram:
+                runHistogramMode();
+                break;
+            case HwCounters:
+                runHwCountersMode();
+                break;
+            default:
+                throw new RuntimeException("Unsupported mode");
         }
 
         control.stop();
     }
+
 
     private void runAverageTimeMode() {
         for (int i = 0; i < warmupIterationCount; i++) {
@@ -83,7 +91,7 @@ class DisruptorAverageTimeProducerL0 extends ThreadPinnedRunnable implements IAv
 
             onOperationStart();
             final long start = System.nanoTime();
-            final long result = runIteration(start);
+            final long result = runAverageTimeIteration(start);
 
             double averageTime = (double) result / operationCount;
             System.out.println(averageTime);
@@ -95,7 +103,7 @@ class DisruptorAverageTimeProducerL0 extends ThreadPinnedRunnable implements IAv
 
             control.onMeasurementStart();
             final long start = System.nanoTime();
-            long result = runIteration(start);
+            long result = runAverageTimeIteration(start);
             averageTimes[i] = (double) result / operationCount;
             control.onMeasurementEnd();
             System.out.println(averageTimes[i]);
@@ -112,7 +120,7 @@ class DisruptorAverageTimeProducerL0 extends ThreadPinnedRunnable implements IAv
 
             System.out.println("WARMUP ITERATION " + i);
 
-            Histogram histogram = runIteration();
+            Histogram histogram = runHistogramIteration();
             histogram.outputPercentileDistribution(System.out, 1.0);
 
             control.waitForNextIteration();
@@ -122,14 +130,32 @@ class DisruptorAverageTimeProducerL0 extends ThreadPinnedRunnable implements IAv
 
             System.out.println("ITERATION " + i);
 
-            Histogram histogram = runIteration();
+            Histogram histogram = runHistogramIteration();
             histograms.add(histogram);
 
             control.waitForNextIteration();
         }
     }
 
-    private long runIteration(long start) {
+    private void runHwCountersMode() {
+        for (int i = 0; i < warmupIterationCount; i++) {
+            System.gc();
+            System.out.println("WARMUP ITERATION " + i);
+
+            runHwCountersIteration();
+            control.waitForNextIteration();
+        }
+
+        for (int i = 0; i < iterationCount; i++) {
+            System.gc();
+            System.out.println("ITERATION " + i);
+
+            runHwCountersIteration();
+            control.waitForNextIteration();
+        }
+    }
+
+    private long runAverageTimeIteration(long start) {
         for (int i = 0; i < operationCount; i++) {
             runSingleOperation();
         }
@@ -143,7 +169,7 @@ class DisruptorAverageTimeProducerL0 extends ThreadPinnedRunnable implements IAv
         return end - start;
     }
 
-    private Histogram runIteration() {
+    private Histogram runHistogramIteration() {
         Histogram histogram = new Histogram(TimeUnit.SECONDS.toNanos(1), 3);
 
         for (int i = 0; i < operationCount; i++) {
@@ -166,7 +192,19 @@ class DisruptorAverageTimeProducerL0 extends ThreadPinnedRunnable implements IAv
         return histogram;
     }
 
+    private void runHwCountersIteration() {
 
+        for (int i = 0; i < operationCount; i++) {
+            onOperationStart();
+            sendBurst(ringBuffer, state.getEmptyTask(), state.getLastTask());
+            onOperationEnd();
+
+            state.waitForLastTaskExecution();
+            state.resetLastTask();
+        }
+
+        finishOperationsProfiling();
+    }
 
     private void runSingleOperation() {
         for (int i = 0; i < batchSize; i++) {
