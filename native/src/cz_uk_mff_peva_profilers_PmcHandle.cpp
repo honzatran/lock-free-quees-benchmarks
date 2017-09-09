@@ -3,6 +3,7 @@
 
 #include <iostream>
 #include <fstream>
+#include <unistd.h>
 
 #include <pcm/utils.h>
 
@@ -14,7 +15,14 @@ using namespace PcmWrapper;
 
 std::unique_ptr<PcmContext> g_context;
 
-std::vector<std::unique_ptr<CounterHandleRecorder<CoreCountersHandle>>> g_coreHandles;
+
+#ifdef __linux__
+using CoreHandle = RDPMCCountersHandle;
+#else
+using CoreHandle = CoreCountersHandle;
+#endif
+
+std::vector<std::unique_ptr<CounterHandleRecorder<CoreHandle>>> g_coreHandles;
 std::vector<std::unique_ptr<CounterHandleRecorder<SystemCountersHandle>>> g_systemHandles;
 
 #if __cplusplus < 201402L
@@ -140,9 +148,13 @@ Java_cz_uk_mff_peva_profilers_PmcHandle_getCoreProfiler(JNIEnv *env,
         return nullptr;
     } 
 
-    CoreCountersHandle handle = g_context->getCoreHandle(cpu);
+#ifdef __linux__
+    auto handle = CoreHandle();
+#else
+    auto handle = g_context->getCoreHandle(cpu);
+#endif
 
-    auto mixin = CounterHandleRecorder<CoreCountersHandle>(
+    auto mixin = CounterHandleRecorder<decltype(handle)>(
         operation, PcmWrapper::FOUR, std::move(handle));
 
     g_coreHandles.push_back(
